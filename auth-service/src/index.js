@@ -1,3 +1,6 @@
+import { GitHubFiles, GitHubError, MAX_UPLOAD_JSON_BYTES } from './github.js';
+import { handlePriceData } from './cloud-documents.js';
+
 const ALLOWED_ORIGINS = new Set([
   'https://icemen.bond',
   'http://127.0.0.1:8778',
@@ -35,7 +38,7 @@ function jsonResponse(request, data, status = 200, extraHeaders = {}) {
 }
 
 function errorResponse(request, error) {
-  if (error instanceof ApiError) {
+  if (error instanceof ApiError || error instanceof GitHubError) {
     return jsonResponse(request, { error: error.code, message: error.message }, error.status, error.headers);
   }
   // Never include request data, stored credentials, or exception details.
@@ -72,22 +75,29 @@ function route(request) {
     '/api/login': 'POST',
     '/api/session': 'GET',
     '/api/password': 'POST',
+    '/api/github/status': 'GET',
+    '/api/github/connect': 'POST',
+    '/api/files': 'GET',
+    '/api/files/upload': 'POST',
+    '/api/publish-status': 'GET',
+    '/api/data/price-calculator': ['GET', 'POST'],
   };
   const method = methods[pathname];
   if (!method) throw new ApiError(404, 'not_found', '接口不存在。');
-  if (request.method !== method) {
-    throw new ApiError(405, 'method_not_allowed', '请求方法不支持。', { Allow: method });
+  const allowed = Array.isArray(method) ? method : [method];
+  if (!allowed.includes(request.method)) {
+    throw new ApiError(405, 'method_not_allowed', '请求方法不支持。', { Allow: allowed.join(', ') });
   }
   checkOrigin(request, request.method === 'POST');
   return pathname;
 }
 
-async function readJson(request) {
+async function readJson(request, maxBytes = MAX_JSON_BYTES) {
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get('Content-Type') || '')) {
     throw new ApiError(415, 'json_required', '请使用 JSON 请求。');
   }
   const length = Number(request.headers.get('Content-Length'));
-  if (length > MAX_JSON_BYTES) throw new ApiError(413, 'request_too_large', '请求内容过大。');
+  if (length > maxBytes) throw new ApiError(413, 'request_too_large', '请求内容过大。');
   if (!request.body) throw new ApiError(400, 'invalid_json', '请求内容无效。');
   const reader = request.body.getReader();
   const chunks = [];
@@ -96,7 +106,7 @@ async function readJson(request) {
     const { value, done } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > MAX_JSON_BYTES) {
+    if (total > maxBytes) {
       await reader.cancel();
       throw new ApiError(413, 'request_too_large', '请求内容过大。');
     }
@@ -287,6 +297,25 @@ export class AuthState {
 
   async handle(request) {
     const pathname = route(request);
+    if (pathname === '/api/data/price-calculator') {
+      await this.session(request);
+      return handlePriceData(request, this.ctx, {
+        readJson: value => readJson(value, 20 * 1024 * 1024),
+        fail: (status, code, message) => { throw new ApiError(status, code, message); },
+        json: (data, status = 200) => jsonResponse(request, data, status),
+      });
+    }
+    if (['/api/github/status', '/api/github/connect', '/api/files', '/api/files/upload', '/api/publish-status'].includes(pathname)) {
+      await this.session(request);
+      const github = new GitHubFiles(this.ctx.storage);
+      let result;
+      if (pathname === '/api/github/status') result = await github.status();
+      else if (pathname === '/api/github/connect') result = await github.connect(await readJson(request));
+      else if (pathname === '/api/files') result = await github.files();
+      else if (pathname === '/api/files/upload') result = await github.upload(await readJson(request, MAX_UPLOAD_JSON_BYTES));
+      else result = await github.publishStatus(new URL(request.url).searchParams.get('sha'));
+      return jsonResponse(request, result);
+    }
     if (pathname === '/api/session') {
       const session = await this.session(request);
       return jsonResponse(request, { ok: true, expiresAt: session.expiresAt });

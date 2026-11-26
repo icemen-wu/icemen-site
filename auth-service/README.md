@@ -1,10 +1,35 @@
-# ICEMEN 全局口令 API
+# ICEMEN 工作台服务
 
-这是 GitHub Pages 导航页的口令服务。一个 SQLite Durable Object 保存全站唯一的 PBKDF2 盐、摘要、口令版本和随机会话签名密钥。浏览器仅获得有时效的 token；服务没有返回口令摘要的接口。
+Cloudflare Workers 为 GitHub Pages 工作台提供统一口令、网站内文件上传与更新，以及价格测算表的全部版本云同步。一个 SQLite Durable Object 保存认证状态、GitHub 专用连接和最新完整测算数据；浏览器使用有时效的 Bearer token 调用服务。
 
-## 发布
+## 使用流程
 
-本目录保存口令服务源码，已部署到 Cloudflare Workers。更新服务时使用：
+### 连接仓库并上传、更新文件
+
+在工作台「设置 → GitHub 连接」创建并连接仓库专用的 **Fine-grained personal access token**：
+
+- 账号与资源所有者：`icemen-wu`。
+- **Repository access → Only select repositories → icemen-site**，仅选择此仓库。创建链接不能代替这一步手动选择。
+- **Repository permissions → Contents: Read and write**。
+- **Repository permissions → Actions: Read-only**。
+
+将生成的令牌粘贴到工作台并点击「连接仓库」。服务固定操作 `icemen-wu/icemen-site` 的 `main` 分支；连接时验证仓库读取、Contents 写入及 Actions 读取权限，成功后才保存连接。令牌只存储在服务端，不写入前端配置或返回给浏览器。令牌过期、撤销或权限变化后，在相同设置位置更新连接。
+
+连接完成后，点击文件工具栏的「上传文件」新增文件和导航入口，或点击文件旁「更新」替换原文件内容。新增文件进入 `files/`，`navigation.json` 与文件通过同一个 Git 提交发布。更新保留既有导航元数据，且只允许更新已配置的本站模块文件，不能覆盖首页、脚本或服务配置。
+
+文件保存成功和 GitHub Pages 发布成功分别显示。若发布失败，仓库中的文件仍已保存，应查看发布记录，而不是直接重复上传。
+
+### 价格表全部版本云同步
+
+价格表的「保存更新」先保留本机修改，再将当前工作区的 `app`、`initial` 和完整 `versions` 一起保存到云端，包含各版本备注、图片、月份数据和设置。业务数据存于 Durable Object，不提交到 GitHub；代码文件更新仍使用上传与发布流程。
+
+首次启用时，必须先在保留最新全部版本数据的电脑和浏览器上核对内容，使用工作台口令登录同步，点击「保存更新」并确认同步成功。之后其他电脑再登录并加载云端。初次迁移前可使用价格表的「导出完整备份」另存完整数据。
+
+打开价格表时会检查云端；页面已打开时每隔约 30 秒检查云端修订号，发现其他设备更新后提示「加载云端」。未点击「保存更新」的本机修改不会自动同步。存在未同步修改时不会直接用云端覆盖；手动加载前先保存完整本机备份，备份失败则停止替换。
+
+云端版本冲突返回 `409 revision_conflict`，拒绝覆盖：先导出本机完整备份，再加载云端，手动合并需要保留的修改，最后重新保存。不执行字段或版本的自动合并。「恢复本机备份」只恢复当前浏览器，核对后再次「保存更新」才会同步。服务只保留最新完整数据，本机备份由当前浏览器的 IndexedDB 保存。
+
+## 部署与存储
 
 ```powershell
 cd auth-service
@@ -14,38 +39,63 @@ npx wrangler whoami
 npx wrangler deploy
 ```
 
-`wrangler login` 打开 Cloudflare OAuth 授权页面。若不能自动打开，可用 `npx wrangler login --browser=false` 查看授权地址，由账号本人完成授权。部署完成后，Wrangler 会输出 `https://icemen-auth.<账户子域>.workers.dev`，将该地址设置为前端 API 根地址。
+OAuth 授权由账号本人完成。若无法自动打开授权页，可使用 `npx wrangler login --browser=false`。部署输出的 Worker 地址应与仓库根目录 `site-config.json` 的 `authApi` 一致。
 
-`wrangler.jsonc` 已配置 `AUTH_STATE` 绑定和 `new_sqlite_classes` 首次迁移，不需要手动创建 KV 或 D1。首次初始化所需的认证参数仅保存在 Cloudflare，不写入本仓库。
+`wrangler.jsonc` 已配置 `AUTH_STATE` 绑定与 SQLite Durable Object 迁移，无需手动创建 KV 或 D1。认证初始化参数在 Cloudflare 配置，不在仓库中保存任何实际口令、令牌或初始化密钥。已初始化对象中的口令独立于初始化参数；保持 Worker 名称、Durable Object 类名、绑定及对象名称稳定，才能继续使用原有认证、连接和数据。
 
-初始配置仅在 Durable Object 没有存储状态时使用。部署前需要在 Cloudflare 配置 `INITIAL_PASSWORD_SALT` 和 `INITIAL_PASSWORD_HASH` 两项服务端参数；不要将值提交到仓库。已有对象中的口令不受这些初始化参数变更影响。请保持 Worker 名称、Durable Object 类名、绑定和对象名称稳定，以继续使用同一个存储。
+生产白名单为 `https://icemen.bond`，本机调试额外允许 `http://127.0.0.1:8778`；其他来源或端口不在白名单。线上前端必须使用 HTTPS。
 
-生产站点必须通过 HTTPS 调用服务；前端白名单为 `https://icemen.bond`。本机调试额外允许 `http://127.0.0.1:8778`，不包含其他地址或端口。
+## API 约定
 
-## API
+响应均为 JSON，带 `Cache-Control: no-store`。POST 必须使用白名单 Origin 与 `Content-Type: application/json`。除了健康检查和登录，以下接口都要求 `Authorization: Bearer <token>`。错误格式为 `{ "error": "code", "message": "中文提示" }`。
 
-所有响应均为 JSON，带 `Cache-Control: no-store`。所有 POST 必须带白名单 Origin 和 `Content-Type: application/json`；请求体最多 4096 字节。错误结构为 `{ "error": "code", "message": "中文提示" }`。
-
-| 路径 | 请求 | 成功响应 |
+| 路径 | 请求 | 成功响应要点 |
 |---|---|---|
 | `GET /api/health` | 无认证 | `{ "ok": true }` |
-| `POST /api/login` | `{ "password": "用户输入" }` | `{ "token": "...", "expiresAt": 毫秒时间戳 }` |
-| `GET /api/session` | `Authorization: Bearer <token>` | `{ "ok": true, "expiresAt": 毫秒时间戳 }` |
-| `POST /api/password` | Bearer 加 `{ "currentPassword": "用户输入", "newPassword": "用户输入" }` | `{ "ok": true, "requiresLogin": true }` |
+| `POST /api/login` | `{ password }` | `{ token, expiresAt }`，到期值为毫秒时间戳 |
+| `GET /api/session` | Bearer | `{ ok, expiresAt }` |
+| `POST /api/password` | `{ currentPassword, newPassword }` | `{ ok, requiresLogin: true }` |
+| `GET /api/github/status` | Bearer | `{ configured, repository, branch, connectedAt? }`，不含令牌 |
+| `POST /api/github/connect` | `{ token }` | 连接状态，不含令牌 |
+| `GET /api/files` | Bearer | `{ modules, headSha }`，来自当前仓库 |
+| `POST /api/files/upload` | 见下文 | `{ ok, sha, module, mode, publishStatus }` |
+| `GET /api/publish-status?sha=<commit>` | Bearer | `{ status, sha, url }`；状态为 `pending/success/failure` |
+| `GET /api/data/price-calculator` | Bearer | `{ exists, revision, updatedAt?, document? }` |
+| `GET /api/data/price-calculator?metadata=1` | Bearer | 只返回存在状态、修订号和时间 |
+| `POST /api/data/price-calculator` | `{ baseRevision, requestId, document }` | `{ ok, revision, updatedAt }` |
 
-登录会话有效期为 8 小时，服务校验 HMAC、到期时间和口令版本。改口令要求正确的当前口令，以及与当前不同的 8–64 字符新口令，不能全为空白。首尾空格不会被自动去掉。
+### 长度与格式
 
-口令保存成功后，同时更换随机盐与签名密钥、递增版本，使所有设备上的旧会话失效。前端收到成功后清除已有 token，并要求重新登录；其他已打开页面下一次校验 session 时也会失效。当前口令输入错误返回 403；过期或无效 Bearer 返回 401，便于前端区分。
+普通 JSON 请求上限为 4096 字节；文件上传请求上限约为 14.1 MiB，原文件上限为 10 MiB；测算数据请求上限为 20 MiB，完整 `document` 上限为 19 MiB。限额会拒绝整个请求，不会删减图片或版本。
 
-同一个 Cloudflare 来源 IP 在 10 分钟窗口内失败 10 次后，后续验证返回 429 和 `Retry-After`。限制表保存在对象内存中，每次验证清理过期项并限制最多 10,000 项；实例回收会重置这些临时计数，口令和会话状态仍由 Durable Object 存储保留。
+允许文件扩展名：`html htm pdf txt csv xlsx xls docx pptx zip png jpg jpeg webp gif`。文件名不得包含路径、控制字符或以点开头。新增接口将原文件名放入 `files/`；更新只接受与目标相同类型的文件，`htm/html`、`jpeg/jpg` 按同一类型处理。
 
-## 验证与费用条件
+上传请求公共字段为 `mode`（`create/update`）、`filename`、`contentBase64`、`expectedHead` 和 `requestId`。新增时发送 `name`、`description`、`category`；更新时发送 `moduleId` 并省略元数据字段，从而保留原导航名称、说明和分类。
 
-主任务已在目录之外运行 Node mock Durable Object 端点测试，覆盖认证、改口令、全部旧会话撤销、存储失败保护、对象重启保留新口令、并发更新、CORS、限流和请求长度限制。真实 Cloudflare 部署与网络测试须在发布后完成。
+`document` 包含 `app`、`initial`（可为 `null`）及至少含一个版本的 `versions.items`。浏览器在上传前同步当前活动版本状态，服务按完整文档保存和校验。
 
-Cloudflare 官方资料确认 Workers Free 支持 SQLite Durable Objects；免费额度包含 Durable Object 请求 100,000 次/日、SQLite 读取 500 万行/日、写入 100,000 行/日及总计 5 GB 存储。实际使用仍受平台免费计划额度约束。
+### 并发、重试与发布
+
+文件上传使用 `expectedHead` 检查仓库版本；发生并发提交时返回 `409`，不强制覆盖分支。客户端应重新读取并核对目标后再提交。`requestId` 与请求内容绑定，超时后使用原请求重试可以恢复已经准备或完成的提交；改变请求内容必须生成新标识。上传完成只说明仓库保存成功，Pages 状态需通过发布状态接口单独查询。
+
+测算数据使用 `baseRevision` 进行乐观并发检查；首存从 `0` 开始，成功后修订号递增。旧修订写入返回 `409 revision_conflict`。重试相同 `requestId` 与内容可以返回已完成结果；同一标识对应不同内容返回 `409 request_id_reused`。文档分块、校验摘要及当前修订指针在存储事务内一起更新，保存失败保留上一份完整数据。
+
+### 会话与口令
+
+会话有效期为 8 小时，校验 HMAC、到期时间和口令版本。修改口令要求正确的当前口令，以及不同于原口令的 8–64 字符新口令，不能全为空白；首尾空格不自动删除。
+
+改口令成功后，更新盐、会话签名密钥及口令版本，使所有设备旧会话失效。导航和价格表同步均使用同一套登录。无效会话返回 `401`；修改口令时当前口令错误返回 `403`。
+
+同一来源 IP 在 10 分钟内验证失败 10 次后返回 `429` 与 `Retry-After`。临时限流计数存于对象内存；对象持久存储保存口令、GitHub 连接和完整云端数据。
+
+## 访问边界与维护
+
+导航口令控制工作台入口；GitHub Pages 上独立静态文件的直接链接仍可访问。文件写入、连接管理及云端测算数据读写需要有效登录。定期保留价格表导出的完整备份；浏览器备份与云端最新文档用途不同。
+
+日常操作和手动导航配置见根目录 [导航配置说明](../导航配置说明.md)。开发验证应覆盖认证与口令撤销、上传同名冲突与幂等重试、Pages 发布失败反馈，以及测算数据完整往返、并发冲突与存储失败保留旧数据。真实服务与网站发布后再验证完整操作流程。
+
+Cloudflare 使用额度以当前账户计划为准：
 
 - [Durable Objects 价格与免费计划](https://developers.cloudflare.com/durable-objects/platform/pricing/)
 - [Wrangler OAuth 登录](https://developers.cloudflare.com/workers/wrangler/commands/general/#login)
-- [Durable Objects 入门及部署](https://developers.cloudflare.com/durable-objects/get-started/)
 - [Durable Object 存储迁移配置](https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/)
