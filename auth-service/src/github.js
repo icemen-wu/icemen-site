@@ -152,10 +152,14 @@ export class GitHubFiles {
           ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
-        redirect: 'error',
+        // Workers supports manual redirects; never forward the token elsewhere.
+        redirect: 'manual',
         cache: 'no-store',
         signal: controller.signal,
       });
+      if (response.status >= 300 && response.status < 400) {
+        fail(502, 'github_request_failed', 'GitHub 暂时无法处理请求，请稍后重试。');
+      }
       if (response.status === 404 && options.allowMissing) return null;
       if (!response.ok) {
         if ([401, 403, 404].includes(response.status)) {
@@ -173,7 +177,7 @@ export class GitHubFiles {
       }
     } catch (error) {
       if (error instanceof GitHubError) throw error;
-      fail(502, 'github_unavailable', '暂时无法连接 GitHub，请保留当前文件并使用同一请求重试。');
+      fail(502, 'github_unavailable', '暂时无法连接 GitHub，请稍后重试；如正在上传，请保留当前文件并使用同一请求重试。');
     } finally { clearTimeout(timeout); }
   }
 
