@@ -3,31 +3,117 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#155e63">
-<meta name="description" content="ICEMEN 工作台：进入价格测算表，管理价格、成本、利润和多个测算版本。">
+<meta name="theme-color" content="#f8f9f7">
+<meta name="description" content="ICEMEN 工作台，集中访问常用工具与业务资料。">
 <title>ICEMEN · 工作台</title>
 <style>
-:root{color-scheme:light;--ink:#172e37;--muted:#677b82;--line:#dce5e7;--teal:#155e63;--paper:#f5f7f7;--white:#fff}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:Inter,"Segoe UI","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}a{color:inherit}.page{max-width:1136px;min-height:100svh;margin:auto;padding:34px 48px 25px;display:flex;flex-direction:column}.top{display:flex;justify-content:space-between;align-items:center;padding-bottom:25px;border-bottom:1px solid var(--line)}.brand{display:flex;align-items:center;gap:12px}.mark{height:35px;width:35px;display:grid;place-items:center;background:var(--teal);border-radius:9px;color:#fff;font-size:22px;font-weight:700;font-family:Georgia,serif}.brand-name{font-size:16px;font-weight:750;letter-spacing:2px}.brand-split{width:1px;height:17px;background:#c9d6da;margin:0 3px}.brand-context{font-size:13px;color:var(--muted)}.domain{font-size:12px;letter-spacing:.4px;color:var(--muted)}main{padding:74px 0 86px;flex:1}.eyebrow{margin:0 0 16px;color:var(--teal);font-size:11px;font-weight:700;letter-spacing:2px}.intro{display:flex;align-items:flex-end;justify-content:space-between;gap:25px;margin-bottom:40px}h1{margin:0;font-size:58px;line-height:1.2;letter-spacing:-2px;font-weight:650}.intro p{margin:0 0 5px;color:var(--muted);font-size:14px;line-height:1.9}.tool{display:block;position:relative;padding:34px 36px 0;border:1px solid #d6e2e4;border-radius:18px;background:var(--white);text-decoration:none;box-shadow:0 8px 30px #193d4410;overflow:hidden;transition:transform .18s,box-shadow .18s,border-color .18s}.tool:hover{transform:translateY(-3px);border-color:#8bb6b9;box-shadow:0 14px 36px #193d4419}.tool:focus-visible{outline:3px solid #258b91;outline-offset:5px}.tool-heading{display:flex;justify-content:space-between;align-items:center;gap:24px}.tool-type{font-size:11px;color:var(--muted);letter-spacing:1.5px}.tool-type span{color:var(--teal);font-weight:700;margin-right:11px}.icon{display:grid;place-items:center;height:61px;width:61px;border-radius:15px;background:#eaf4f3;color:var(--teal);flex-shrink:0}.icon svg{width:31px;height:31px}h2{margin:18px 0 12px;font-size:34px;line-height:1.35;font-weight:650;letter-spacing:-.6px}.description{margin:0;max-width:640px;color:var(--muted);font-size:14px;line-height:1.9}.features{display:flex;flex-wrap:wrap;gap:9px;margin:25px 0 36px}.features span{padding:6px 11px;border-radius:6px;background:#f2f6f6;color:#4a666e;font-size:12px}.tool-bottom{display:flex;justify-content:space-between;align-items:center;gap:20px;border-top:1px solid #e6ecee;padding:22px 0 24px}.tool-note{font-size:12px;color:var(--muted)}.open{display:inline-flex;align-items:center;gap:20px;color:var(--teal);font-size:14px;font-weight:650;white-space:nowrap}.arrow{font-size:23px;line-height:1;transition:transform .18s}.tool:hover .arrow{transform:translateX(4px)}.footer{display:flex;justify-content:space-between;gap:20px;border-top:1px solid var(--line);padding-top:19px;color:#7c8f95;font-size:11px;letter-spacing:.3px}.footer strong{font-weight:550;color:#547078}@media(max-width:700px){.page{padding:24px 22px 20px}.top{padding-bottom:21px}.domain{display:none}main{padding:49px 0 55px}.intro{display:block;margin-bottom:28px}h1{font-size:44px;letter-spacing:-1.5px}.intro p{margin-top:16px;font-size:13px}.tool{padding:25px 24px 0;border-radius:14px}.icon{height:49px;width:49px;border-radius:12px}.icon svg{height:26px;width:26px}h2{font-size:28px;margin-top:19px}.description{font-size:13px}.features{margin:21px 0 28px;gap:7px}.features span{font-size:11px;padding:5px 9px}.tool-bottom{padding:19px 0 21px}.tool-note{display:none}.open{justify-content:space-between;width:100%}.footer{font-size:10px;gap:10px}}@media(prefers-reduced-motion:reduce){.tool,.arrow{transition:none}.tool:hover{transform:none}}
+:root{color-scheme:light;--paper:#f8f9f7;--card:#fff;--ink:#252e2c;--muted:#7b8581;--line:#e3e8e3;--accent:#3d6e61}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:"Segoe UI","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}a{color:inherit}.page{width:min(1120px,100%);min-height:100svh;margin:auto;padding:0 48px;display:flex;flex-direction:column}.topbar{height:104px;display:flex;align-items:center;justify-content:space-between;gap:24px}.brand{display:inline-flex;align-items:center;gap:13px}.brand-mark{display:flex;gap:3px;align-items:center;height:22px}.brand-mark i{display:block;width:5px;background:var(--accent);border-radius:2px}.brand-mark i:nth-child(1){height:13px}.brand-mark i:nth-child(2){height:22px}.brand-mark i:nth-child(3){height:16px}.wordmark{font-size:17px;font-weight:650;letter-spacing:2.5px}.domain{color:var(--muted);font-size:12px;letter-spacing:.3px}main{flex:1;padding:76px 0 112px}.intro{margin-bottom:58px}.eyebrow{display:flex;align-items:center;gap:8px;margin:0 0 19px;color:var(--accent);font-size:10px;letter-spacing:2px;font-weight:650}.eyebrow::before{content:"";width:17px;height:1px;background:currentColor}h1{margin:0;font-size:50px;font-weight:550;line-height:1.25;letter-spacing:-1.5px}.intro p{margin:19px 0 0;color:var(--muted);font-size:14px;line-height:1.8;letter-spacing:.3px}.section-label{margin:0 0 18px;font-size:12px;font-weight:500;color:#65716b;letter-spacing:.8px}.tool-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}.tool-card{min-height:258px;padding:27px 27px 23px;border:1px solid var(--line);border-radius:16px;background:var(--card);text-decoration:none;display:flex;flex-direction:column;transition:border-color .18s,box-shadow .18s,transform .18s}.tool-card:hover{border-color:#b8ccc0;box-shadow:0 8px 26px #324d3d09;transform:translateY(-2px)}.tool-card:focus-visible{outline:2px solid var(--accent);outline-offset:5px}.card-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:29px}.tool-icon{width:40px;height:40px;border-radius:11px;background:#edf3ee;color:var(--accent);display:grid;place-items:center}.tool-icon svg{width:22px;height:22px}.card-arrow{color:#99aaa0;transition:color .18s,transform .18s}.card-arrow svg{display:block;width:18px;height:18px}.tool-card:hover .card-arrow{color:var(--accent);transform:translate(2px,-2px)}.tool-card h2{margin:0 0 11px;font-size:21px;line-height:1.4;font-weight:600;letter-spacing:-.3px}.tool-card p{margin:0;color:var(--muted);font-size:12px;line-height:1.9}.card-meta{margin-top:auto;padding-top:24px;display:flex;align-items:center;gap:8px;color:#8a958e;font-size:10px;letter-spacing:.2px}.card-meta span+span::before{content:"·";margin-right:8px;color:#b2bcb5}.expansion-note{margin:25px 0 0;color:#929b95;font-size:11px;line-height:1.8}footer{padding:23px 0 28px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:20px;color:#919a94;font-size:10px;letter-spacing:.3px}.footer-brand{font-size:10px;letter-spacing:1.5px;color:#6c7b72}@media(max-width:900px){.tool-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.page{padding:0 36px}main{padding-top:62px}}@media(max-width:560px){.page{padding:0 24px}.topbar{height:84px}.wordmark{font-size:15px;letter-spacing:2px}.domain{font-size:10px}main{padding:46px 0 75px}.intro{margin-bottom:42px}.eyebrow{font-size:9px;margin-bottom:17px}h1{font-size:40px}.intro p{font-size:13px;margin-top:16px}.tool-grid{grid-template-columns:1fr;gap:16px}.tool-card{min-height:236px;padding:25px}.card-top{margin-bottom:25px}.tool-card h2{font-size:21px}.tool-card p{font-size:13px}.card-meta{padding-top:22px;font-size:11px}.expansion-note{margin-top:21px}footer{padding:22px 0 25px;font-size:9px}.footer-brand{font-size:9px}}@media(prefers-reduced-motion:reduce){.tool-card,.card-arrow{transition:none}.tool-card:hover,.tool-card:hover .card-arrow{transform:none}}
+[hidden]{display:none!important}.topbar-actions{display:flex;align-items:center;gap:25px}.logout{border:0;padding:7px 0;background:transparent;font:inherit;font-size:12px;color:var(--muted);cursor:pointer}.logout:hover{color:var(--accent)}.logout:focus-visible{outline:2px solid var(--accent);outline-offset:5px}.login-view{display:grid;place-items:center;padding:42px 0 118px}.login-panel{width:min(356px,100%);margin-top:-25px}.login-symbol{width:43px;height:43px;margin-bottom:29px;border:1px solid #dce6dd;border-radius:13px;display:grid;place-items:center;color:var(--accent);background:#f0f4ef}.login-symbol svg{width:21px;height:21px}.login-panel h1{font-size:32px;letter-spacing:-.7px;font-weight:550}.login-description{margin:14px 0 31px;color:var(--muted);font-size:13px;line-height:1.8}.access-label{display:block;font-size:12px;color:#59665f;margin-bottom:10px}.access-input{display:block;width:100%;border:1px solid #dce3dc;border-radius:10px;background:#fff;padding:15px 16px;font:inherit;font-size:14px;color:var(--ink);outline:none;transition:border-color .15s,box-shadow .15s}.access-input::placeholder{color:#a2aaa5}.access-input:focus{border-color:#89a896;box-shadow:0 0 0 3px #3d6e6110}.access-input[aria-invalid=true]{border-color:#ba7068}.access-submit{display:block;width:100%;border:0;border-radius:10px;background:var(--accent);color:white;font:inherit;font-size:13px;font-weight:550;padding:15px 20px;margin-top:16px;cursor:pointer;transition:background .15s}.access-submit:hover{background:#315b4f}.access-submit:focus-visible{outline:2px solid var(--accent);outline-offset:4px}.access-submit:disabled{opacity:.65;cursor:wait}.access-error{min-height:21px;margin:13px 0 0;color:#a65950;font-size:12px;line-height:1.7}.no-script{font-size:12px;color:#a65950;line-height:1.8}@media(max-width:560px){.topbar-actions{gap:18px}.login-view{padding:45px 0 90px}.login-panel{margin-top:0}.login-panel h1{font-size:29px}.login-description{font-size:13px}}
 </style>
 </head>
 <body>
 <div class="page">
-<header class="top">
-  <div class="brand"><span class="mark" aria-hidden="true">I</span><span class="brand-name">ICEMEN</span><span class="brand-split" aria-hidden="true"></span><span class="brand-context">工作台</span></div>
-  <span class="domain">icemen.bond</span>
-</header>
-<main>
-  <p class="eyebrow">YOUR WORKSPACE</p>
-  <div class="intro"><h1>工作台</h1><p>常用工具，集中访问。<br>选择下方入口，开始你的测算。</p></div>
-  <a class="tool" href="./价格测算表.html" aria-labelledby="price-title" aria-describedby="price-description">
-    <div class="tool-heading"><div class="tool-type"><span>01</span>业务工具</div><div class="icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="20" height="26" rx="3"/><path d="M11 8h10M11 13h10M11 19h2m6 0h2M11 24h2m6 0h2"/></svg></div></div>
-    <h2 id="price-title">价格测算表</h2>
-    <p class="description" id="price-description">调整产品价格与成本，查看利润变化。通过不同版本管理测算方案，查看月度数据与预算明细。</p>
-    <div class="features" aria-label="工具功能"><span>价格与成本</span><span>利润测算</span><span>多版本管理</span><span>月度预算</span></div>
-    <div class="tool-bottom"><span class="tool-note">打开完整测算工作区</span><span class="open">进入价格测算表<span class="arrow" aria-hidden="true">↗</span></span></div>
-  </a>
+<header class="topbar"><div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span class="wordmark">ICEMEN</span></div><div class="topbar-actions"><span class="domain">icemen.bond</span><button class="logout" id="access-logout" type="button" hidden>退出</button></div></header>
+<main class="login-view" id="login-view" aria-labelledby="login-title">
+<section class="login-panel">
+<div class="login-symbol" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10" width="14" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg></div>
+<h1 id="login-title">进入工作台</h1>
+<p class="login-description">输入访问口令，打开你的工具与资料。</p>
+<form id="access-form">
+<label class="access-label" for="access-password">访问口令</label>
+<input class="access-input" id="access-password" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="请输入口令" aria-describedby="access-error" required>
+<button class="access-submit" id="access-submit" type="submit" disabled>进入工作台</button>
+<p class="access-error" id="access-error" role="status" aria-live="polite"></p>
+</form>
+<noscript><p class="no-script">请启用浏览器的 JavaScript 后进入工作台。</p></noscript>
+</section>
 </main>
-<footer class="footer"><strong>ICEMEN · 工作台</strong><span>工具与业务资料入口</span></footer>
+<main id="workspace-view" hidden>
+<section class="intro" aria-labelledby="workspace-title"><div class="eyebrow" lang="en">WORKSPACE</div><h1 id="workspace-title">工作台</h1><p>常用工具与资料，集中在这里。</p></section>
+<section aria-labelledby="tools-title">
+<h2 class="section-label" id="tools-title">常用工具</h2>
+<nav class="tool-grid" aria-label="工作台工具">
+<!-- 新入口可按相同 tool-card 结构添加，网格会自动排列。 -->
+<a class="tool-card" href="./价格测算表.html" aria-labelledby="price-title" aria-describedby="price-description">
+<div class="card-top"><span class="tool-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M9 7h6M9 11h1m4 0h1M9 15h1m4 0h1M9 18h1m4 0h1"/></svg></span><span class="card-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M7 6h11v11"/></svg></span></div>
+<h2 id="price-title">价格测算表</h2><p id="price-description">调整价格与成本，查看利润变化，<br>管理不同版本的测算方案。</p><div class="card-meta" aria-label="功能"><span>价格与利润</span><span>多版本</span><span>月度预算</span></div>
+</a>
+</nav>
+<p class="expansion-note">后续工具可继续添加。</p>
+</section>
+</main>
+<footer><span class="footer-brand">ICEMEN</span><span>让工作，有条不紊。</span></footer>
 </div>
+<script>
+(() => {
+  // Simple navigation gate. Linked files remain directly accessible.
+  const EXPECTED_HASH = '47bbd662ded44e93561a9ec112467402b6f114183b12d23c2dddfc46e5941b4a';
+  const SESSION_KEY = 'icemen.navigation.access';
+  const SESSION_STAMP = EXPECTED_HASH.slice(0, 12);
+  const loginView = document.getElementById('login-view');
+  const workspaceView = document.getElementById('workspace-view');
+  const form = document.getElementById('access-form');
+  const input = document.getElementById('access-password');
+  const submit = document.getElementById('access-submit');
+  const message = document.getElementById('access-error');
+  const logout = document.getElementById('access-logout');
+  function showWorkspace(unlocked) {
+    loginView.hidden = unlocked;
+    workspaceView.hidden = !unlocked;
+    logout.hidden = !unlocked;
+  }
+  let restored = false;
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
+    restored = saved?.stamp === SESSION_STAMP && saved.until > Date.now();
+  } catch (_) {}
+  showWorkspace(restored);
+  submit.disabled = false;
+  input.addEventListener('input', () => {
+    input.removeAttribute('aria-invalid');
+    message.textContent = '';
+  });
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (submit.disabled) return;
+    submit.disabled = true;
+    submit.textContent = '正在进入…';
+    message.textContent = '';
+    try {
+      if (!window.crypto?.subtle) throw new Error('unsupported-browser');
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input.value));
+      const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+      if (hash !== EXPECTED_HASH) {
+        input.setAttribute('aria-invalid', 'true');
+        message.textContent = '口令不正确，请重新输入。';
+        input.value = '';
+        input.focus();
+        return;
+      }
+      try {
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify({stamp: SESSION_STAMP, until: Date.now() + 8 * 60 * 60 * 1000}));
+      } catch (_) {}
+      input.value = '';
+      showWorkspace(true);
+      const title = document.getElementById('workspace-title');
+      title.tabIndex = -1;
+      title.focus();
+    } catch (_) {
+      message.textContent = '暂时无法校验口令，请使用新版浏览器打开此页面。';
+    } finally {
+      submit.disabled = false;
+      submit.textContent = '进入工作台';
+    }
+  });
+  logout.addEventListener('click', () => {
+    try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
+    input.value = '';
+    input.removeAttribute('aria-invalid');
+    message.textContent = '';
+    showWorkspace(false);
+    input.focus();
+  });
+})();
+</script>
 </body>
 </html>
