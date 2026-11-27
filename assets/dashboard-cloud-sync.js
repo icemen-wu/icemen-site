@@ -13,6 +13,21 @@
   let revision = 0, remoteRevision = 0, baseline = '', dirty = false, generation = 0, updatedAt = '';
   let saveBusy = false, loadBusy = false, pollBusy = false, pendingRequest = null;
   let startupCheck = Promise.resolve(), backupDatabase, backupEntries = [];
+  let configBusy = false, needsFullLoad = true, retryTimer = null, retryDelay = 1500;
+
+  function scheduleRefresh(backoff = false) {
+    if (location.protocol === 'file:' || retryTimer !== null) return;
+    const delay = backoff ? retryDelay : 1000;
+    if (backoff) retryDelay = Math.min(retryDelay * 2, 30000);
+    retryTimer = setTimeout(() => { retryTimer = null; void refreshConnection(); }, delay);
+  }
+
+  function deferLoad(text) {
+    needsFullLoad = true;
+    message(text, 'pending');
+    scheduleRefresh();
+    return false;
+  }
 
   function validateDocument(value) {
     const numeric = ['月销量', '月销售额(CNY)', '赛盒利润'];
@@ -67,8 +82,9 @@
     dirty = true;
     persistMetadata();
     if (!saveBusy) message(remoteRevision > revision
-      ? '本机有未保存修改，其他电脑也有更新；请先核对云端数据。'
+      ? '其他电脑有新数据，稍后将先备份本机修改，再自动加载最新数据。'
       : '数据已在本机更新，点击“保存更新”同步到其他电脑。', 'pending');
+    refreshButtons();
   }
 
   function session() {
@@ -81,7 +97,7 @@
 
   function refreshButtons() {
     if (!ui) return;
-    ui.save.disabled = saveBusy || loadBusy;
+    ui.save.disabled = saveBusy || loadBusy || !!bridge.isImporting?.();
     ui.login.hidden = !!session();
     ui.login.disabled = !apiBase || saveBusy || loadBusy;
     ui.load.disabled = !apiBase || saveBusy || loadBusy;
@@ -115,7 +131,7 @@
       }
       return result;
     } catch (error) {
-      if (error.name === 'AbortError') throw new Error('云同步超时，请再次点击“保存更新”；本机数据仍保留。');
+      if (error.name === 'AbortError') throw new Error('云同步超时；本机数据仍保留。');
       if (error instanceof TypeError) throw new Error('无法连接云同步服务，请检查网络后重试；本机数据仍保留。');
       throw error;
     } finally { clearTimeout(timeout); }
@@ -128,7 +144,7 @@
       try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
       message('登录已过期或口令已更新，请登录同步；本机修改仍保留。', 'error');
     } else if (error.status === 409) {
-      message('其他电脑已保存新数据，未覆盖云端。请先“加载最新”，本机修改会另存备份。', 'error');
+      message('其他电脑已保存新数据，正在备份本机修改并自动加载最新数据。', 'pending');
     } else message(context + '：' + error.message, 'error');
     refreshButtons();
   }
@@ -191,62 +207,76 @@
     finally { applying = false; }
   }
 
-  async function acceptCloud(result, manual, startedAtGeneration) {
+  async function acceptCloud(result, force, startedAtGeneration) {
     if (!result.exists) {
       if (revision > 0) throw new Error('云端数据暂不可用，保留本机数据，请稍后重试。');
       remoteRevision = 0;
+      needsFullLoad = false;
       message('云端尚无经营数据，点击“保存更新”首次同步整份数据。', 'pending');
       return false;
     }
     if (!Number.isSafeInteger(result.revision) || result.revision < 1) throw new Error('云端版本号无效，未替换数据。');
+    if (result.revision < revision) throw new Error('收到过期云端版本，将自动重新检查。');
     validateDocument(result.document);
     remoteRevision = Math.max(remoteRevision, result.revision);
+    if (!force && result.revision === revision) { needsFullLoad = false; return true; }
+    if (bridge.isImporting?.()) return deferLoad('正在导入 Excel，完成后会自动检查云端最新数据。');
     const before = generation, current = bridge.capture();
     const [localFingerprint, cloudFingerprint] = await Promise.all([fingerprint(current), fingerprint(result.document)]);
     if (generation !== before || generation !== startedAtGeneration) {
-      message('读取期间本机数据已修改，未覆盖。请核对后保存或“加载最新”。', 'pending'); return false;
+      return deferLoad('读取期间本机数据有变化，稍后将先备份，再自动加载最新数据。');
     }
     if (localFingerprint === cloudFingerprint) {
       revision = result.revision; baseline = localFingerprint; dirty = false;
       updatedAt = result.updatedAt || ''; pendingRequest = null; persistMetadata();
+      needsFullLoad = false; retryDelay = 1500;
       message('经营数据已与云端一致，其他电脑可查看相同数据。', 'success'); return true;
     }
-    if (!manual && dirty) {
-      message('云端已有数据，本机有未保存修改；未自动覆盖。点击“加载最新”前会先备份本机数据。', 'pending'); return false;
-    }
-    if (manual && dirty && !confirm('本机有未同步修改。将先保存完整本机备份，再加载云端最新数据，是否继续？')) return false;
+    const hadUnsavedChanges = dirty;
     const backupGeneration = generation;
-    await writeBackup(current, manual ? '手动加载最新前' : '自动加载最新前');
-    if (generation !== backupGeneration || (!manual && dirty)) {
-      message('备份期间本机又有修改，已停止加载，现有数据保留。', 'pending'); return false;
+    await writeBackup(current, hadUnsavedChanges ? '自动加载最新前（未保存修改）' : '自动加载最新前');
+    if (generation !== backupGeneration || bridge.isImporting?.()) {
+      return deferLoad('备份期间本机数据有变化，现有数据保留，稍后会自动重试。');
     }
     const persisted = replaceLocal(result.document);
     revision = result.revision; remoteRevision = result.revision;
     baseline = cloudFingerprint; dirty = false; updatedAt = result.updatedAt || '';
-    pendingRequest = null; persistMetadata();
+    pendingRequest = null; needsFullLoad = false; retryDelay = 1500; persistMetadata();
     message(persisted === false ? '已加载云端最新数据；本机存储空间不足，关闭后可重新联网加载。'
-      : '已加载云端最新数据 · ' + new Date(updatedAt || Date.now()).toLocaleString('zh-CN') + '；原本机数据已备份。', 'success');
+      : '已自动加载云端最新数据 · ' + new Date(updatedAt || Date.now()).toLocaleString('zh-CN') + (hadUnsavedChanges ? '；本机未保存修改已备份，可从“恢复本机备份”找回。' : '；原本机数据已备份。'), 'success');
     return true;
   }
 
-  async function loadCloud(manual = false) {
-    if (loadBusy || saveBusy) return false;
-    if (!session()) { openLogin(); return false; }
+  async function loadCloud(force = needsFullLoad) {
+    if (loadBusy || saveBusy || bridge.isImporting?.()) {
+      if (force) needsFullLoad = true;
+      scheduleRefresh(); return false;
+    }
+    if (!session()) return false;
     loadBusy = true; refreshButtons();
     const startedAtGeneration = generation;
     try {
       const result = await apiRequest(API_PATH);
-      return await acceptCloud(result, manual, startedAtGeneration);
-    } catch (error) { handleError(error, '加载最新失败'); return false; }
+      return await acceptCloud(result, force, startedAtGeneration);
+    } catch (error) {
+      needsFullLoad = true; handleError(error, '自动加载暂未完成，稍后自动重试');
+      if (error.status !== 401) scheduleRefresh(true);
+      return false;
+    }
     finally { loadBusy = false; refreshButtons(); }
   }
 
   async function saveCloud() {
     await startupCheck;
-    if (saveBusy || loadBusy) return;
-    if (!apiBase) { message('云同步未连接，数据仅保留在本机。请从工作台网站打开后重试。', 'error'); return; }
+    if (saveBusy || loadBusy || bridge.isImporting?.()) return;
+    if (!apiBase) {
+      message(location.protocol === 'file:' ? '当前为本地文件，数据仅保留在本机；请从工作台网站打开以同步。'
+        : '云同步暂未连接，正在自动重连；连上后请再次保存，本机数据仍保留。', 'pending');
+      scheduleRefresh(true); return;
+    }
     if (!session()) { message('请登录同步，再点击“保存更新”；本机数据仍保留。', 'pending'); openLogin(); return; }
     saveBusy = true; refreshButtons();
+    let conflict = false;
     try {
       const document = validateDocument(bridge.capture());
       if (new TextEncoder().encode(JSON.stringify(document)).byteLength > MAX_BYTES) throw new Error('完整数据超过19 MiB，未删减任何内容；请减少数据量后重试。');
@@ -261,27 +291,65 @@
       if (!result.ok || !Number.isSafeInteger(result.revision) || result.revision < 1) throw new Error('云端未返回有效保存结果，请重试。');
       revision = result.revision; remoteRevision = result.revision; baseline = sentFingerprint;
       updatedAt = result.updatedAt || ''; pendingRequest = null; dirty = generation !== sentGeneration;
+      needsFullLoad = false; retryDelay = 1500;
       persistMetadata();
       message(dirty ? '本次数据已保存；保存期间的新修改尚未同步，请再次保存。'
         : '已保存到云端 · ' + new Date(updatedAt || Date.now()).toLocaleString('zh-CN') + '，其他电脑打开后自动加载。', dirty ? 'pending' : 'success');
     } catch (error) {
-      if (error.status === 409) { pendingRequest = null; remoteRevision = Math.max(remoteRevision, revision + 1); }
+      if (error.status === 409) {
+        pendingRequest = null; remoteRevision = Math.max(remoteRevision, revision + 1);
+        needsFullLoad = true; conflict = true;
+      }
       handleError(error, '保存失败');
-    } finally { saveBusy = false; refreshButtons(); }
+    } finally {
+      saveBusy = false; refreshButtons();
+      if (conflict) await loadCloud(true);
+      else scheduleRefresh();
+    }
   }
 
   async function pollCloud() {
     if (!initialized || document.visibilityState === 'hidden' || !session() || saveBusy || loadBusy || pollBusy) return;
+    if (bridge.isImporting?.()) { scheduleRefresh(); return; }
+    if (needsFullLoad) { await loadCloud(true); return; }
     pollBusy = true;
     try {
       const result = await apiRequest(API_PATH + '?metadata=1');
       if (result.exists && Number.isSafeInteger(result.revision) && result.revision > revision) {
         remoteRevision = result.revision;
-        if (dirty) message('其他电脑已保存新数据；本机有未保存修改，未自动覆盖。可点击“加载最新”。', 'pending');
-        else await loadCloud(false);
+        needsFullLoad = true;
+        await loadCloud(true);
       }
-    } catch (error) { if (error.status === 401) handleError(error); }
+      retryDelay = 1500;
+    } catch (error) {
+      handleError(error, '自动检查暂未完成，稍后自动重试');
+      if (error.status !== 401) scheduleRefresh(true);
+    }
     finally { pollBusy = false; refreshButtons(); }
+  }
+
+  async function refreshConnection() {
+    if (!initialized || location.protocol === 'file:' || document.visibilityState === 'hidden') return;
+    if (!apiBase) {
+      if (configBusy) return;
+      configBusy = true;
+      const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 20000);
+      try {
+        const response = await fetch('./site-config.json', { cache: 'no-store', credentials: 'omit', signal: controller.signal });
+        if (!response.ok) throw new Error('无法读取云同步配置。');
+        const config = await response.json(), url = new URL(config.authApi);
+        if (url.protocol !== 'https:' && !(location.hostname === '127.0.0.1' && url.hostname === '127.0.0.1' && url.protocol === 'http:')) throw new Error('云同步服务需要使用HTTPS。');
+        apiBase = url.href.replace(/\/$/, ''); retryDelay = 1500;
+      } catch (error) {
+        message('云同步暂未连接，将自动重试；本机数据仍保留。', 'pending');
+        scheduleRefresh(true); return;
+      } finally { clearTimeout(timeout); configBusy = false; refreshButtons(); }
+    }
+    if (!session()) {
+      message('登录同步后将自动显示云端最新数据；本机修改会先备份。', 'pending');
+      refreshButtons(); return;
+    }
+    await pollCloud();
   }
 
   function node(tag, properties = {}, text) {
@@ -303,7 +371,7 @@
     const status = node('span', { id: 'dashboard-cloud-status' }, '正在连接云同步…');
     status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
     const login = node('button', { id: 'dashboardCloudLoginBtn', type: 'button', className: 'btn' }, '登录同步');
-    const load = node('button', { id: 'dashboardCloudLoadBtn', type: 'button', className: 'btn' }, '加载最新');
+    const load = node('button', { id: 'dashboardCloudLoadBtn', type: 'button', className: 'btn', hidden: true }, '加载最新');
     const restore = node('button', { id: 'dashboardCloudRestoreBtn', type: 'button', className: 'btn', hidden: true }, '恢复本机备份');
     bar.append(status, login, load, restore);
     const loginDialog = node('dialog', { className: 'dashboard-cloud-dialog' }), loginForm = node('form');
@@ -335,7 +403,8 @@
         if (typeof result.token !== 'string' || !result.token || !Number.isFinite(result.expiresAt) || result.expiresAt <= Date.now()) throw new Error('登录服务未返回有效会话。');
         sessionStorage.setItem(SESSION_KEY, JSON.stringify({ token: result.token, until: result.expiresAt }));
         password.value = ''; loginDialog.close(); refreshButtons();
-        startupCheck = loadCloud(false); await startupCheck;
+        needsFullLoad = true;
+        startupCheck = loadCloud(true); await startupCheck;
       } catch (error) { password.value = ''; loginMessage.textContent = error.message; }
       finally { loginSubmit.disabled = false; }
     });
@@ -347,7 +416,7 @@
     });
     backupCancel.addEventListener('click', () => backupDialog.close());
     backupForm.addEventListener('submit', async event => {
-      event.preventDefault(); if (loadBusy || saveBusy) return;
+      event.preventDefault(); if (loadBusy || saveBusy || bridge.isImporting?.()) return;
       loadBusy = true; backupSubmit.disabled = true; refreshButtons();
       const startedAtGeneration = generation;
       try {
@@ -355,7 +424,7 @@
         if (!confirm('将恢复所选整份经营数据，当前数据会另存备份，云端不会自动改变，是否继续？')) return;
         await writeBackup(bridge.capture(), '恢复其他备份前');
         if (generation !== startedAtGeneration) throw new Error('恢复期间本机又有修改，已停止替换。');
-        const persisted = replaceLocal(restored); markDirty(); pendingRequest = null; backupDialog.close();
+        const persisted = replaceLocal(restored); markDirty(); pendingRequest = null; needsFullLoad = false; backupDialog.close();
         message(persisted === false ? '已恢复备份，但本机存储空间不足，请及时保存到云端。' : '已恢复本机备份；请核对后点击“保存更新”同步。', 'pending');
       } catch (error) { backupMessage.textContent = error.message; }
       finally { loadBusy = false; backupSubmit.disabled = false; refreshButtons(); }
@@ -364,6 +433,7 @@
 
   async function initialize() {
     if (!bridge) throw new Error('经营驾驶舱尚未准备好，请刷新重试。');
+    needsFullLoad = true;
     let metadata;
     try { metadata = JSON.parse(localStorage.getItem(META_KEY) || '{}') || {}; } catch (_) { metadata = {}; }
     revision = Number.isSafeInteger(metadata.revision) && metadata.revision >= 0 ? metadata.revision : 0;
@@ -378,17 +448,13 @@
     if (location.protocol === 'file:') {
       message('当前为本地文件，仅在本机保存。请从工作台网站打开以同步其他电脑。', 'pending'); refreshButtons(); return;
     }
-    const response = await fetch('./site-config.json', { cache: 'no-store', credentials: 'omit' });
-    if (!response.ok) throw new Error('无法读取云同步配置；本机数据仍保留。');
-    const config = await response.json(), url = new URL(config.authApi);
-    if (url.protocol !== 'https:' && !(location.hostname === '127.0.0.1' && url.hostname === '127.0.0.1' && url.protocol === 'http:')) throw new Error('云同步服务需要使用HTTPS。');
-    apiBase = url.href.replace(/\/$/, ''); initialized = true;
-    if (session()) { startupCheck = loadCloud(false); await startupCheck; }
-    else message(dirty ? '本机有未同步数据，请登录后点击“保存更新”。' : '登录同步后可保存经营数据，其他电脑打开时自动加载。', dirty ? 'pending' : '');
+    initialized = true;
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') void refreshConnection(); });
+    window.addEventListener('focus', () => { void refreshConnection(); });
+    window.addEventListener('online', () => { void refreshConnection(); });
+    setInterval(() => { void refreshConnection(); }, 15000);
+    await refreshConnection();
     refreshButtons();
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') void pollCloud(); });
-    window.addEventListener('focus', () => { void pollCloud(); });
-    setInterval(() => { void pollCloud(); }, 30000);
   }
 
   window.addEventListener('beforeunload', event => {
