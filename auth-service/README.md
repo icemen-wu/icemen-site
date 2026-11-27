@@ -1,6 +1,6 @@
 # ICEMEN 工作台服务
 
-Cloudflare Workers 为 GitHub Pages 工作台提供统一口令、网站内文件上传、更新与删除，以及价格测算表的全部版本云同步。一个 SQLite Durable Object 保存认证状态、GitHub 专用连接和最新完整测算数据；浏览器使用有时效的 Bearer token 调用服务。
+Cloudflare Workers 为 GitHub Pages 工作台提供统一口令、网站内文件上传、更新与删除，以及价格测算表和经营驾驶舱的数据云同步。一个 SQLite Durable Object 保存认证状态、GitHub 专用连接和各模块最新完整数据；浏览器使用有时效的 Bearer token 调用服务。
 
 ## 使用流程
 
@@ -30,6 +30,14 @@ Cloudflare Workers 为 GitHub Pages 工作台提供统一口令、网站内文�
 打开价格表时会检查云端；页面已打开时每隔约 30 秒检查云端修订号，发现其他设备更新后提示「加载云端」。未点击「保存更新」的本机修改不会自动同步。存在未同步修改时不会直接用云端覆盖；手动加载前先保存完整本机备份，备份失败则停止替换。
 
 云端版本冲突返回 `409 revision_conflict`，拒绝覆盖：先导出本机完整备份，再加载云端，手动合并需要保留的修改，最后重新保存。不执行字段或版本的自动合并。「恢复本机备份」只恢复当前浏览器，核对后再次「保存更新」才会同步。服务只保留最新完整数据，本机备份由当前浏览器的 IndexedDB 保存。
+
+### 经营驾驶舱保存更新
+
+在经营驾驶舱中「上传更新 Excel」后，点击顶部「保存更新」，看到云端保存成功提示后，其他电脑打开驾驶舱即可加载这份数据。保存包含整份预算明细，筛选、搜索和当前展示的行数不会缩小保存范围。使用工作台同一个口令登录，无需单独配置 GitHub 令牌。
+
+上传 Excel 和「恢复内置数据」先影响当前浏览器，再点击「保存更新」才会同步。未保存的本机修改不会被自动加载覆盖；发现其他电脑已更新时，先保留本机备份，再加载最新数据并整理需要保留的修改。保存发生版本冲突时会停止覆盖，不自动合并两台电脑的数据。
+
+驾驶舱数据使用独立存储空间，与价格测算表互不覆盖。业务数据保存不产生 GitHub 提交，也不需要重新发布 HTML；离线页面仍可本地读取 Excel，但云同步需要打开网站并登录。
 
 ## 部署与存储
 
@@ -66,6 +74,9 @@ OAuth 授权由账号本人完成。若无法自动打开授权页，可使用 `
 | `GET /api/data/price-calculator` | Bearer | `{ exists, revision, updatedAt?, document? }` |
 | `GET /api/data/price-calculator?metadata=1` | Bearer | 只返回存在状态、修订号和时间 |
 | `POST /api/data/price-calculator` | `{ baseRevision, requestId, document }` | `{ ok, revision, updatedAt }` |
+| `GET /api/data/operating-dashboard` | Bearer | `{ exists, revision, updatedAt?, document? }` |
+| `GET /api/data/operating-dashboard?metadata=1` | Bearer | 只返回存在状态、修订号和时间 |
+| `POST /api/data/operating-dashboard` | `{ baseRevision, requestId, document }` | `{ ok, revision, updatedAt }` |
 
 ### 长度与格式
 
@@ -78,6 +89,8 @@ OAuth 授权由账号本人完成。若无法自动打开授权页，可使用 `
 删除请求必须发送 `moduleId`、`expectedHead`、`requestId`；可选的 `expectedPath` 必须与用户确认时的原导航路径完全一致，用于防止目标路径在操作期间改变。服务端仍从当前导航解析实际目标，不接受客户端任意指定删除路径。只允许删除导航中配置的安全普通文件，不允许首页、隐藏路径、脚本目录、服务目录或配置；共用文件返回 `409 shared_file`，目标不存在返回 `409 file_not_found`。文件删除与导航移除通过 Git tree 的 `sha: null` 和新的导航 blob 原子提交，分支引用更新禁止强推。
 
 `document` 包含 `app`、`initial`（可为 `null`）及至少含一个版本的 `versions.items`。浏览器在上传前同步当前活动版本状态，服务按完整文档保存和校验。
+
+经营驾驶舱的 `document` 为 `{ schemaVersion: 1, sourceName, rows }`，`rows` 保存全部预算明细，保留 Excel 行中的各字段。该接口同样采用 20 MiB 请求、19 MiB 文档上限及修订号并发检查；数据与测算表使用不同的存储键。
 
 ### 并发、重试与发布
 

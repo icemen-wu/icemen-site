@@ -1,5 +1,6 @@
 import { GitHubFiles, GitHubError, MAX_UPLOAD_JSON_BYTES } from './github.js';
 import { handlePriceData } from './cloud-documents.js';
+import { handleDashboardData } from './dashboard-documents.js';
 
 const ALLOWED_ORIGINS = new Set([
   'https://icemen.bond',
@@ -82,6 +83,7 @@ function route(request) {
     '/api/files/delete': 'POST',
     '/api/publish-status': 'GET',
     '/api/data/price-calculator': ['GET', 'POST'],
+    '/api/data/operating-dashboard': ['GET', 'POST'],
   };
   const method = methods[pathname];
   if (!method) throw new ApiError(404, 'not_found', '接口不存在。');
@@ -298,6 +300,14 @@ export class AuthState {
 
   async handle(request) {
     const pathname = route(request);
+    if (pathname === '/api/data/operating-dashboard') {
+      await this.session(request);
+      return handleDashboardData(request, this.ctx, {
+        readJson: value => readJson(value, 20 * 1024 * 1024),
+        fail: (status, code, message) => { throw new ApiError(status, code, message); },
+        json: (data, status = 200) => jsonResponse(request, data, status),
+      });
+    }
     if (pathname === '/api/data/price-calculator') {
       await this.session(request);
       return handlePriceData(request, this.ctx, {
