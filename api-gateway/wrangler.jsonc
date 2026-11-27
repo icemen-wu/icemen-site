@@ -1,0 +1,12 @@
+{
+  "$schema": "../auth-service/node_modules/wrangler/config-schema.json",
+  "name": "icemen-api-gateway",
+  "pages_build_output_dir": "./public",
+  "compatibility_date": "2026-11-27",
+  "services": [
+    {
+      "binding": "AUTH",
+      "service": "icemen-auth"
+    }
+  ]
+}
