@@ -4,7 +4,7 @@
   const $ = id => document.getElementById(id);
   const read = key => { try { return localStorage.getItem(key); } catch (_) { return null; } };
   let modules = [], apiBase = '', configLoaded = false, unlocked = false, activeView = 'home', selectedId = '', token = '';
-  let githubConfigured = false, repositoryHead = '', uploadContext = null, uploadBusy = false, publishTimer, publishGeneration = 0, dialogPublishSha = '';
+  let githubConfigured = false, repositoryHead = '', uploadContext = null, uploadBusy = false, deleteContext = null, deleteBusy = false, fileActionPreparing = false, publishTimer, publishGeneration = 0, dialogPublishSha = '', dialogPublishKind = 'save';
   const MAX_FILE_BYTES = 10 * 1024 * 1024;
   const ALLOWED_FILES = /\.(html?|pdf|txt|csv|xlsx?|docx|pptx|zip|png|jpe?g|webp|gif)$/i;
   let favorites = new Set(), layout = read(LAYOUT_KEY) === 'grid' ? 'grid' : 'list', toastTimer, sessionTimer, checkingSession = false, sessionUntil = 0, sessionGeneration = 0;
@@ -25,6 +25,8 @@
     $('access-password').removeAttribute('aria-invalid'); $('access-error').textContent = message;
     $('access-error').classList.toggle('success', success); clearPasswordForm(); $('github-connect-form').reset();
     if ($('upload-dialog').open) $('upload-dialog').close();
+    if ($('delete-dialog').open) $('delete-dialog').close();
+    uploadContext = null; deleteContext = null;
     document.title = 'ICEMEN · 工作台';
   }
   async function requestApi(path, body, sessionToken = token, timeoutMs = 15000) {
@@ -84,7 +86,7 @@
     $('detail-favorite').setAttribute('aria-pressed', String(favorite)); $('detail-favorite').setAttribute('aria-label', (favorite ? '取消收藏' : '收藏') + item.name); $('detail-favorite').title = favorite ? '取消收藏' : '收藏';
     $('detail-type').textContent = fileType(item.path);
     $('detail-open').querySelector('span').textContent = /\.html?$/i.test(item.path) ? '打开工具' : '打开文件';
-    $('detail-update').disabled = uploadBusy;
+    $('detail-update').disabled = fileActionBusy(); $('detail-delete').disabled = fileActionBusy();
   }
   function selectFile(id) { selectedId = id; renderFiles(); $('details-panel').hidden = false; $('details-panel').classList.add('is-open'); }
   function toggleFavorite(id) {
@@ -97,9 +99,10 @@
     const nameBox = make('div', 'file-name'), select = make('button', 'file-icon'); select.type = 'button'; select.setAttribute('aria-label', '查看' + item.name + '详情'); select.setAttribute('aria-pressed', String(selectedId === item.id)); select.append(icon('file')); select.addEventListener('click', () => selectFile(item.id));
     const nameText = make('div', 'file-name-text'), link = make('a', 'file-title', item.name); link.href = item.path; nameText.append(link, make('p', 'file-description', item.description)); nameBox.append(select, nameText);
     const star = make('button', 'icon-button favorite-button' + (favorites.has(item.id) ? ' is-favorite' : '')); star.type = 'button'; star.title = favorites.has(item.id) ? '取消收藏' : '收藏'; star.setAttribute('aria-label', (favorites.has(item.id) ? '取消收藏' : '收藏') + item.name); star.setAttribute('aria-pressed', String(favorites.has(item.id))); star.append(icon('star')); star.addEventListener('click', () => toggleFavorite(item.id));
-    const actions = make('div', 'file-actions'), update = make('button', 'file-update', '更新');
-    update.type = 'button'; update.setAttribute('aria-label', '更新' + item.name); update.disabled = uploadBusy;
-    update.addEventListener('click', () => openUpload('update', item.id)); actions.append(update, star);
+    const actions = make('div', 'file-actions'), update = make('button', 'file-update', '更新'), remove = make('button', 'file-update file-delete', '删除');
+    update.type = 'button'; update.setAttribute('aria-label', '更新' + item.name); update.disabled = fileActionBusy();
+    remove.type = 'button'; remove.setAttribute('aria-label', '删除' + item.name); remove.disabled = fileActionBusy();
+    update.addEventListener('click', () => openUpload('update', item.id)); remove.addEventListener('click', () => openDelete(item.id)); actions.append(update, remove, star);
     row.append(nameBox, make('span', 'file-type', fileType(item.path)), make('span', 'file-location', item.category), actions); row.addEventListener('click', event => { if (!event.target.closest('a,button')) selectFile(item.id); }); return row;
   }
   function renderFiles() {
@@ -109,7 +112,7 @@
     $('file-items').replaceChildren(...visible.map(createRow)); $('file-items').dataset.layout = layout; $('file-items').classList.toggle('is-grid', layout === 'grid');
     ['list','grid'].forEach(value => { $('view-' + value).classList.toggle('is-active', layout === value); $('view-' + value).setAttribute('aria-pressed', String(layout === value)); });
     $('clear-search').hidden = !query || activeView === 'settings'; $('result-count').textContent = visible.length + ' 项'; $('list-footer-count').textContent = '共 ' + visible.length + ' 项'; $('empty-state').hidden = visible.length > 0;
-    $('empty-title').textContent = query ? '没有找到相关文件' : (activeView === 'favorites' ? '还没有收藏' : '还没有工具'); $('empty-description').textContent = query ? '试试其他关键词。' : (activeView === 'favorites' ? '点击文件旁的星标，把常用工具收藏到这里。' : '在 navigation.json 中添加模块后会显示在这里。');
+    $('empty-title').textContent = query ? '没有找到相关文件' : (activeView === 'favorites' ? '还没有收藏' : '还没有工具'); $('empty-description').textContent = query ? '试试其他关键词。' : (activeView === 'favorites' ? '点击文件旁的星标，把常用工具收藏到这里。' : '点击“上传文件”添加工具与资料。');
     $('details-panel').hidden = activeView === 'settings' || !visible.length; const selected = visible.find(item => item.id === selectedId); if (selected) updateDetails(selected);
   }
   function route(view) {
@@ -159,8 +162,11 @@
     return ({pdf:'PDF 文档',xlsx:'Excel 表格',xls:'Excel 表格',csv:'CSV 表格',docx:'Word 文档',pptx:'演示文稿',zip:'压缩文件',txt:'文本文件'})[extension] || '文件';
   }
   function fileSize(bytes) { return bytes < 1024 * 1024 ? (bytes / 1024).toFixed(1) + ' KB' : (bytes / (1024 * 1024)).toFixed(2) + ' MB'; }
+  function fileActionBusy() { return uploadBusy || deleteBusy || fileActionPreparing; }
   async function loadRepositoryFiles() {
+    const generation = sessionGeneration, checkedToken = token;
     const result = await requestApi('/api/files');
+    if (!unlocked || generation !== sessionGeneration || checkedToken !== token) return result;
     modules = normalizeModules({modules:result.modules}); repositoryHead = result.headSha; buildModules(); renderFiles();
     return result;
   }
@@ -174,8 +180,9 @@
       $('github-connect-submit').textContent = githubConfigured ? '更新连接' : '连接仓库';
       if (githubConfigured) {
         await loadRepositoryFiles();
+        if (!unlocked || generation !== sessionGeneration) return;
         let pending; try { pending = JSON.parse(sessionStorage.getItem('icemen.navigation.pendingPublish') || 'null'); } catch (_) {}
-        if (pending?.sha) pollPublication(pending.sha, Date.now(), false);
+        if (pending?.sha) pollPublication(pending.sha, Date.now(), false, publishGeneration, sessionGeneration, pending.kind === 'delete' ? 'delete' : 'save');
       }
     } catch (error) {
       if (!unlocked || generation !== sessionGeneration) return;
@@ -190,23 +197,25 @@
       await requestApi('/api/github/connect', {token:$('github-token').value.trim()}, token, 45000);
       $('github-connect-form').reset(); githubConfigured = true;
       $('github-status').textContent = '已连接 icemen-wu/icemen-site'; $('github-connect-submit').textContent = '更新连接';
-      $('github-message').textContent = '连接成功，可以直接上传和更新文件。'; await loadRepositoryFiles();
+      $('github-message').textContent = '连接成功，可以直接上传、更新和删除文件。'; await loadRepositoryFiles();
     } catch (error) {
       $('github-message').textContent = error.message;
       if (error.status === 401) lock('登录已过期，请重新进入。');
     } finally { $('github-connect-submit').disabled = false; }
   });
   async function openUpload(mode, moduleId) {
-    if (!unlocked || uploadBusy) return;
+    if (!unlocked || fileActionBusy()) return;
+    const generation = sessionGeneration; fileActionPreparing = true; $('upload-create').disabled = true; renderFiles();
     try {
       if (!githubConfigured) {
-        const state = await requestApi('/api/github/status'); githubConfigured = !!state.configured;
+        const state = await requestApi('/api/github/status'); if (!unlocked || generation !== sessionGeneration) return; githubConfigured = !!state.configured;
         if (!githubConfigured) { route('settings'); $('github-message').textContent = '请先连接 GitHub 仓库，之后就能在这里上传文件。'; $('github-token').focus(); return; }
       }
-      $('upload-create').disabled = true; await loadRepositoryFiles();
+      await loadRepositoryFiles();
+      if (!unlocked || generation !== sessionGeneration) return;
       const item = mode === 'update' ? modules.find(entry => entry.id === moduleId) : null;
       if (mode === 'update' && !item) throw new Error('文件入口已变更，请刷新列表后重试。');
-      clearTimeout(publishTimer); publishGeneration++; dialogPublishSha = '';
+      clearTimeout(publishTimer); publishGeneration++; dialogPublishSha = ''; dialogPublishKind = 'save';
       uploadContext = {mode, moduleId, expectedHead:repositoryHead, requestId:crypto.randomUUID(), item};
       $('upload-form').reset(); $('upload-title').textContent = mode === 'update' ? '更新文件' : '上传文件';
       $('upload-target').textContent = item ? '将替换：' + item.name + '（' + item.path.replace(/^\.\//,'') + '）' : '选择文件并填写名称，发布后会自动添加到导航。';
@@ -216,11 +225,12 @@
       $('upload-submit').textContent = mode === 'update' ? '更新并发布' : '上传并发布';
       $('upload-submit').disabled = false; $('upload-cancel').disabled = false; $('upload-close').disabled = false;
       $('upload-dialog').showModal();
-    } catch (error) { announce(error.message); if (error.status === 401) lock('登录已过期，请重新进入。'); }
-    finally { $('upload-create').disabled = false; }
+    } catch (error) { if (unlocked && generation === sessionGeneration) { announce(error.message); if (error.status === 401) lock('登录已过期，请重新进入。'); } }
+    finally { fileActionPreparing = false; $('upload-create').disabled = fileActionBusy(); if (unlocked) renderFiles(); }
   }
   $('upload-create').addEventListener('click', () => openUpload('create'));
   $('detail-update').addEventListener('click', () => { if (selectedId) openUpload('update',selectedId); });
+  $('detail-delete').addEventListener('click', () => { if (selectedId) openDelete(selectedId); });
   ['upload-cancel','upload-close'].forEach(id => $(id).addEventListener('click', () => { if (!uploadBusy) $('upload-dialog').close(); }));
   $('upload-dialog').addEventListener('cancel', event => { if (uploadBusy) event.preventDefault(); });
   function resetRequestId() { if (uploadContext) uploadContext.requestId = crypto.randomUUID(); }
@@ -230,6 +240,66 @@
     $('upload-file-info').textContent = file ? file.name + ' · ' + fileSize(file.size) : '';
     if (file && uploadContext?.mode === 'create' && !$('upload-name').value) $('upload-name').value = file.name.replace(/\.[^.]+$/,'');
   });
+  async function openDelete(moduleId) {
+    if (!unlocked || fileActionBusy()) return;
+    const generation = sessionGeneration; fileActionPreparing = true; $('upload-create').disabled = true; renderFiles();
+    try {
+      if (!githubConfigured) {
+        const state = await requestApi('/api/github/status'); if (!unlocked || generation !== sessionGeneration) return; githubConfigured = !!state.configured;
+        if (!githubConfigured) { route('settings'); $('github-message').textContent = '请先连接 GitHub 仓库，之后就能删除文件。'; $('github-token').focus(); return; }
+      }
+      await loadRepositoryFiles();
+      if (!unlocked || generation !== sessionGeneration) return;
+      const item = modules.find(entry => entry.id === moduleId);
+      if (!item) throw new Error('文件入口已变更，请刷新列表后重试。');
+      clearTimeout(publishTimer); publishGeneration++; dialogPublishSha = ''; dialogPublishKind = 'delete';
+      deleteContext = { moduleId, expectedHead:repositoryHead, requestId:crypto.randomUUID(), item };
+      let displayPath = item.path.replace(/^\.\//,''); try { displayPath = decodeURIComponent(displayPath); } catch (_) {}
+      $('delete-form').reset(); $('delete-name').textContent = item.name; $('delete-filename').textContent = displayPath;
+      $('delete-message').textContent = ''; $('delete-progress').hidden = true; $('delete-deploy-link').hidden = true;
+      $('delete-submit').textContent = '删除并发布'; $('delete-submit').disabled = true; $('delete-cancel').textContent = '取消'; $('delete-cancel').disabled = false; $('delete-close').disabled = false; $('delete-confirm').disabled = false;
+      $('delete-dialog').showModal(); $('delete-cancel').focus();
+    } catch (error) { if (unlocked && generation === sessionGeneration) { announce(error.message); if (error.status === 401) lock('登录已过期，请重新进入。'); } }
+    finally { fileActionPreparing = false; $('upload-create').disabled = fileActionBusy(); if (unlocked) renderFiles(); }
+  }
+  ['delete-cancel','delete-close'].forEach(id => $(id).addEventListener('click', () => { if (!deleteBusy) { deleteContext = null; $('delete-dialog').close(); } }));
+  $('delete-dialog').addEventListener('cancel', event => { if (deleteBusy) event.preventDefault(); else deleteContext = null; });
+  $('delete-confirm').addEventListener('change', () => { $('delete-submit').disabled = deleteBusy || !deleteContext || !$('delete-confirm').checked; });
+  $('delete-form').addEventListener('submit', async event => {
+    event.preventDefault(); if (!deleteContext || fileActionBusy() || !unlocked || !$('delete-confirm').checked) return;
+    const context = deleteContext, generation = sessionGeneration, checkedToken = token;
+    deleteBusy = true; $('upload-create').disabled = true; $('delete-submit').disabled = true; $('delete-cancel').disabled = true; $('delete-close').disabled = true; $('delete-confirm').disabled = true;
+    $('delete-dialog').setAttribute('aria-busy','true'); $('delete-progress').hidden = false; $('delete-progress').removeAttribute('value'); $('delete-message').textContent = '正在删除文件和导航入口…'; renderFiles();
+    try {
+      const result = await requestApi('/api/files/delete', { moduleId:context.moduleId, expectedHead:context.expectedHead, expectedPath:context.item.path, requestId:context.requestId }, checkedToken, 120000);
+      if (!unlocked || generation !== sessionGeneration || deleteContext !== context) return;
+      dialogPublishSha = result.sha; dialogPublishKind = 'delete'; publishGeneration++;
+      try { sessionStorage.setItem('icemen.navigation.pendingPublish',JSON.stringify({sha:result.sha,kind:'delete'})); } catch (_) {}
+      deleteContext = null; modules = modules.filter(item => item.id !== context.moduleId); favorites.delete(context.moduleId);
+      try { localStorage.setItem(FAVORITES_KEY,JSON.stringify([...favorites])); } catch (_) {}
+      buildModules(); renderFiles(); $('delete-submit').textContent = '已删除'; $('delete-cancel').textContent = '关闭';
+      $('delete-deploy-link').href = 'https://github.com/icemen-wu/icemen-site/actions'; $('delete-deploy-link').hidden = false;
+      try { await loadRepositoryFiles(); } catch (_) { if (unlocked && generation === sessionGeneration) announce('删除已保存，稍后刷新列表即可查看。'); }
+      if (!unlocked || generation !== sessionGeneration) return;
+      pollPublication(result.sha,Date.now(),true,publishGeneration,generation,'delete');
+    } catch (error) {
+      if (!unlocked || generation !== sessionGeneration || deleteContext !== context) return;
+      if (error.status === 401) { lock('登录已过期，请重新进入后删除。'); return; }
+      $('delete-message').textContent = error.message;
+      if (error.status === 409) {
+        deleteContext = null; $('delete-message').textContent += ' 请关闭此窗口，核对最新文件后重新点击删除。';
+        try { await loadRepositoryFiles(); } catch (_) {}
+      }
+      $('delete-progress').hidden = true;
+    } finally {
+      deleteBusy = false; $('upload-create').disabled = fileActionBusy();
+      if (unlocked && generation === sessionGeneration) {
+        $('delete-dialog').removeAttribute('aria-busy'); $('delete-cancel').disabled = false; $('delete-close').disabled = false;
+        $('delete-confirm').disabled = !deleteContext; $('delete-submit').disabled = !deleteContext || !$('delete-confirm').checked;
+      }
+      if (unlocked) renderFiles();
+    }
+  });
   function readFileBase64(file) {
     return new Promise((resolve,reject) => {
       const reader = new FileReader(); reader.onerror = () => reject(new Error('文件读取失败，请重新选择。'));
@@ -238,27 +308,29 @@
     });
   }
   function publicationMessage(message, finished = false, sha = '') {
-    if ($('upload-dialog').open && sha === dialogPublishSha) { $('upload-message').textContent = message; $('upload-progress').hidden = false; if (finished) $('upload-progress').value = 100; else $('upload-progress').removeAttribute('value'); }
+    const prefix = dialogPublishKind === 'delete' ? 'delete' : 'upload';
+    if ($(prefix + '-dialog').open && sha === dialogPublishSha) { $(prefix + '-message').textContent = message; $(prefix + '-progress').hidden = false; if (finished) $(prefix + '-progress').value = 100; else $(prefix + '-progress').removeAttribute('value'); }
     else announce(message);
   }
-  async function pollPublication(sha, startedAt, interactive = true, generation = publishGeneration, session = sessionGeneration) {
+  async function pollPublication(sha, startedAt, interactive = true, generation = publishGeneration, session = sessionGeneration, kind = 'save') {
     clearTimeout(publishTimer); if (!unlocked || generation !== publishGeneration || session !== sessionGeneration) return;
     try {
       const result = await requestApi('/api/publish-status?sha=' + encodeURIComponent(sha));
       if (!unlocked || generation !== publishGeneration || session !== sessionGeneration) return;
-      if (result.url && dialogPublishSha === sha) { $('upload-deploy-link').href = result.url; $('upload-deploy-link').hidden = false; }
+      const prefix = kind === 'delete' ? 'delete' : 'upload', saved = kind === 'delete' ? '文件与导航入口已删除' : '文件已保存';
+      if (result.url && dialogPublishSha === sha && dialogPublishKind === kind) { $(prefix + '-deploy-link').href = result.url; $(prefix + '-deploy-link').hidden = false; }
       if (result.status === 'success') {
         try { if (JSON.parse(sessionStorage.getItem('icemen.navigation.pendingPublish') || 'null')?.sha === sha) sessionStorage.removeItem('icemen.navigation.pendingPublish'); } catch (_) {}
-        publicationMessage('发布完成，现在可以打开最新文件。',true,sha); return;
+        publicationMessage(kind === 'delete' ? '删除已发布，导航入口与网站文件已更新。' : '发布完成，现在可以打开最新文件。',true,sha); return;
       }
-      if (result.status === 'failure') { publicationMessage('文件已保存到仓库，但网站发布失败。请查看发布记录。',true,sha); return; }
-      if (Date.now() - startedAt > 5 * 60 * 1000) { publicationMessage('文件已保存，网站仍在发布中，请稍后刷新或查看发布记录。',false,sha); return; }
-      if (interactive) publicationMessage('文件已保存，正在发布到网站…',false,sha);
-      publishTimer = setTimeout(() => pollPublication(sha,startedAt,interactive,generation,session),5000);
-    } catch (error) { if (generation === publishGeneration && session === sessionGeneration && unlocked) publicationMessage('文件已保存；暂时无法读取发布进度，请稍后刷新网站。',false,sha); }
+      if (result.status === 'failure') { publicationMessage((kind === 'delete' ? '删除已保存到仓库' : '文件已保存到仓库') + '，但网站发布失败。请查看发布记录。',true,sha); return; }
+      if (Date.now() - startedAt > 5 * 60 * 1000) { publicationMessage(saved + '，网站仍在发布中，请稍后刷新或查看发布记录。',false,sha); return; }
+      if (interactive) publicationMessage(saved + '，正在发布到网站…',false,sha);
+      publishTimer = setTimeout(() => pollPublication(sha,startedAt,interactive,generation,session,kind),5000);
+    } catch (error) { if (generation === publishGeneration && session === sessionGeneration && unlocked) publicationMessage((kind === 'delete' ? '删除已保存' : '文件已保存') + '；暂时无法读取发布进度，请稍后刷新网站。',false,sha); }
   }
   $('upload-form').addEventListener('submit', async event => {
-    event.preventDefault(); if (!uploadContext || uploadBusy || !unlocked) return;
+    event.preventDefault(); if (!uploadContext || fileActionBusy() || !unlocked) return;
     const file = $('upload-file').files[0];
     if (!file) { $('upload-message').textContent = '请先选择文件。'; return; }
     if (!file.size || file.size > MAX_FILE_BYTES) { $('upload-message').textContent = '请选择非空且不超过 10 MB 的文件。'; return; }
@@ -267,31 +339,36 @@
       const targetExtension = uploadContext.item.path.split('.').pop().toLowerCase(), selectedExtension = file.name.split('.').pop().toLowerCase();
       if (targetExtension !== selectedExtension) { $('upload-message').textContent = '请选择与原文件格式相同的文件（.' + targetExtension + '）。'; return; }
     }
-    const context = {...uploadContext}, generation = sessionGeneration;
-    uploadBusy = true; $('upload-submit').disabled = true; $('upload-cancel').disabled = true; $('upload-close').disabled = true;
+    const context = {...uploadContext}, generation = sessionGeneration, checkedToken = token;
+    uploadBusy = true; $('upload-create').disabled = true; $('upload-submit').disabled = true; $('upload-cancel').disabled = true; $('upload-close').disabled = true; renderFiles();
     $('upload-progress').hidden = false; $('upload-progress').removeAttribute('value'); $('upload-message').textContent = '正在读取文件…';
     $('upload-form').querySelectorAll('input,textarea').forEach(input => { input.disabled = true; });
     try {
-      const contentBase64 = await readFileBase64(file); $('upload-message').textContent = '正在上传并保存到仓库…';
+      const contentBase64 = await readFileBase64(file);
+      if (!unlocked || generation !== sessionGeneration) return;
+      $('upload-message').textContent = '正在上传并保存到仓库…';
       const result = await requestApi('/api/files/upload',{
         mode:context.mode,moduleId:context.moduleId,filename:file.name,contentBase64,
         ...(context.mode === 'create' ? {name:$('upload-name').value.trim(),description:$('upload-description').value.trim(),category:$('upload-category').value.trim()} : {}),
         expectedHead:context.expectedHead,requestId:context.requestId
-      },token,120000);
+      },checkedToken,120000);
       if (!unlocked || generation !== sessionGeneration) return;
-      dialogPublishSha = result.sha; publishGeneration++;
-      try { sessionStorage.setItem('icemen.navigation.pendingPublish',JSON.stringify({sha:result.sha})); } catch (_) {}
+      dialogPublishSha = result.sha; dialogPublishKind = 'save'; publishGeneration++;
+      try { sessionStorage.setItem('icemen.navigation.pendingPublish',JSON.stringify({sha:result.sha,kind:'save'})); } catch (_) {}
       $('upload-deploy-link').href = 'https://github.com/icemen-wu/icemen-site/actions'; $('upload-deploy-link').hidden = false;
       $('upload-submit').textContent = '已保存'; $('upload-submit').disabled = true; uploadContext = null;
-      try { await loadRepositoryFiles(); } catch (_) { announce('文件已保存，稍后刷新列表即可查看。'); }
+      try { await loadRepositoryFiles(); } catch (_) { if (unlocked && generation === sessionGeneration) announce('文件已保存，稍后刷新列表即可查看。'); }
+      if (!unlocked || generation !== sessionGeneration) return;
       if (result.module?.id) selectedId = result.module.id; renderFiles();
       pollPublication(result.sha,Date.now());
     } catch (error) {
+      if (!unlocked || generation !== sessionGeneration) return;
       if (error.status === 401) { lock('登录已过期，请重新进入后上传。'); return; }
       $('upload-message').textContent = error.message;
       if (error.status === 409) {
         try {
           await loadRepositoryFiles();
+          if (!unlocked || generation !== sessionGeneration) return;
           if (uploadContext?.mode === 'update') {
             const latest = modules.find(item => item.id === uploadContext.moduleId);
             if (!latest || latest.path !== uploadContext.item.path) { uploadContext = null; $('upload-message').textContent = '目标文件路径已被修改，请关闭弹窗后重新选择要更新的文件。'; }
@@ -303,9 +380,12 @@
       }
       $('upload-progress').hidden = true; $('upload-submit').disabled = !uploadContext;
     } finally {
-      uploadBusy = false; $('upload-cancel').disabled = false; $('upload-close').disabled = false;
-      $('upload-form').querySelectorAll('input,textarea').forEach(input => { input.disabled = false; });
-      if (context.mode === 'update') $('upload-metadata').querySelectorAll('input,textarea,select').forEach(input => { input.disabled = true; });
+      uploadBusy = false; $('upload-create').disabled = fileActionBusy();
+      if (unlocked && generation === sessionGeneration) {
+        $('upload-cancel').disabled = false; $('upload-close').disabled = false;
+        $('upload-form').querySelectorAll('input,textarea').forEach(input => { input.disabled = false; });
+        if (context.mode === 'update') $('upload-metadata').querySelectorAll('input,textarea,select').forEach(input => { input.disabled = true; });
+      }
       if (unlocked) renderFiles();
     }
   });

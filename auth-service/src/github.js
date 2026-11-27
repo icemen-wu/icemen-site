@@ -54,6 +54,18 @@ function modulePath(value) {
   return path;
 }
 
+// Navigation links can reference the same file through queries, fragments or
+// canonical site URLs. This is only for alias checks, never a deletion target.
+function referencedModulePath(value) {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value, 'https://icemen.bond/');
+    if (!['http:', 'https:'].includes(url.protocol) || url.hostname !== 'icemen.bond' ||
+        url.port || url.username || url.password) return null;
+    return modulePath('.' + url.pathname);
+  } catch (_) { return null; }
+}
+
 function contentsPath(path) {
   return PREFIX + '/contents/' + path.split('/').map(encodeURIComponent).join('/');
 }
@@ -167,7 +179,7 @@ export class GitHubFiles {
             'GitHub 令牌无效、已过期或无权访问指定仓库，请重新连接并检查权限。');
         }
         if (options.refUpdate && [409, 422].includes(response.status)) {
-          fail(409, 'head_changed', '仓库已有新提交，请刷新文件列表后重新确认上传。');
+          fail(409, 'head_changed', '仓库已有新提交，请刷新文件列表后重新确认本次操作。');
         }
         if ([429].includes(response.status)) fail(429, 'github_rate_limited', 'GitHub 请求过于频繁，请稍后重试。');
         fail(502, 'github_request_failed', 'GitHub 暂时无法处理请求，请稍后重试。');
@@ -177,7 +189,7 @@ export class GitHubFiles {
       }
     } catch (error) {
       if (error instanceof GitHubError) throw error;
-      fail(502, 'github_unavailable', '暂时无法连接 GitHub，请稍后重试；如正在上传，请保留当前文件并使用同一请求重试。');
+      fail(502, 'github_unavailable', '暂时无法连接 GitHub，请稍后重试；如正在处理文件，请保留当前窗口并使用同一请求重试。');
     } finally { clearTimeout(timeout); }
   }
 
@@ -273,7 +285,7 @@ export class GitHubFiles {
     if (currentHead !== record.baseHead) {
       const comparison = await this.api(token, 'GET', PREFIX + '/compare/' + record.commitSha + '...' + currentHead);
       if (['ahead', 'identical'].includes(comparison?.status)) return this.finish(record);
-      fail(409, 'head_changed', '仓库已有新提交；本次上传尚未应用，请刷新后重新确认。');
+      fail(409, 'head_changed', '仓库已有新提交；本次操作尚未应用，请刷新后重新确认。');
     }
     await this.api(token, 'PATCH', PREFIX + '/git/refs/heads/' + BRANCH, { sha: record.commitSha, force: false }, { refUpdate: true });
     return this.finish(record);
@@ -369,6 +381,80 @@ export class GitHubFiles {
       result: { ok: true, sha: commitSha, module, mode: body.mode, publishStatus: 'pending' },
     };
     // Persist before updating the branch so retries can recover a lost response.
+    await this.saveRecord(record);
+    return this.resume(token, record);
+  }
+
+  async delete(body) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'invalid_request', '删除请求无效。');
+    if (typeof body.moduleId !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(body.moduleId)) {
+      fail(400, 'invalid_module', '请选择要删除的模块。');
+    }
+    if (typeof body.requestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(body.requestId)) {
+      fail(400, 'invalid_request_id', '删除请求标识无效，请重新选择文件。');
+    }
+    if (typeof body.expectedHead !== 'string' || !SHA.test(body.expectedHead)) {
+      fail(400, 'invalid_head', '请刷新文件列表后重新确认删除。');
+    }
+    if (body.expectedPath !== undefined && typeof body.expectedPath !== 'string') {
+      fail(400, 'invalid_path', '文件路径无效，请重新选择文件。');
+    }
+    const identity = await fingerprint(encoder.encode(JSON.stringify({
+      mode: 'delete', moduleId: body.moduleId, expectedHead: body.expectedHead, expectedPath: body.expectedPath,
+    })));
+    const existing = await this.storage.get('fileUploadRequest:' + body.requestId);
+    if (existing) {
+      if (existing.fingerprint !== identity) fail(409, 'request_id_reused', '此请求标识已用于其他操作，请重新确认删除。');
+      if (existing.status === 'success') return existing.result;
+      const connection = await this.connection();
+      return this.resume(connection.token, existing);
+    }
+    const connection = await this.connection();
+    const token = connection.token;
+    const snapshot = await this.snapshot(token);
+    if (body.expectedHead !== snapshot.headSha) fail(409, 'head_changed', '仓库已有新提交，请刷新文件列表后重新确认删除。');
+    const module = snapshot.navigation.modules.find(item => item.id === body.moduleId);
+    if (!module) fail(404, 'module_not_found', '模块已不存在，请刷新文件列表。');
+    if (body.expectedPath !== undefined && body.expectedPath !== module.path) {
+      fail(409, 'path_changed', '目标文件路径已变更，请重新选择并确认删除。');
+    }
+    const path = modulePath(module.path);
+    if (!path) fail(400, 'protected_path', '只能删除本站模块文件，不能删除首页、脚本或配置。');
+    if (snapshot.navigation.modules.some(item => item.id !== module.id && referencedModulePath(item.path) === path)) {
+      fail(409, 'shared_file', '这个文件还有其他导航入口使用，请先核对模块配置。');
+    }
+    const commit = await this.api(token, 'GET', PREFIX + '/git/commits/' + snapshot.headSha);
+    const baseTree = sha(commit?.tree?.sha);
+    const sourceTree = await this.api(token, 'GET', PREFIX + '/git/trees/' + baseTree + '?recursive=1');
+    if (!Array.isArray(sourceTree?.tree) || sourceTree.truncated) {
+      fail(502, 'github_invalid_response', '无法完整核对仓库文件，请稍后重新确认删除。');
+    }
+    const target = sourceTree.tree.find(item => item.path === path);
+    if (!target) fail(409, 'file_not_found', '仓库中的文件已不存在，请核对模块配置。');
+    if (target.type !== 'blob' || !['100644', '100755'].includes(target.mode)) {
+      fail(400, 'protected_path', '只能删除普通模块文件，不能删除目录、链接或子仓库。');
+    }
+    const modules = snapshot.navigation.modules.filter(item => item.id !== module.id);
+    const navigationBlob = await this.api(token, 'POST', PREFIX + '/git/blobs', {
+      content: utf8Base64(JSON.stringify({ ...snapshot.navigation, modules }, null, 2) + '\n'), encoding: 'base64',
+    });
+    const tree = await this.api(token, 'POST', PREFIX + '/git/trees', {
+      base_tree: baseTree,
+      tree: [
+        { path, mode: target.mode, type: 'blob', sha: null },
+        { path: 'navigation.json', mode: '100644', type: 'blob', sha: sha(navigationBlob?.sha) },
+      ],
+    });
+    const created = await this.api(token, 'POST', PREFIX + '/git/commits', {
+      message: 'Delete ' + path + ' from ICEMEN workspace',
+      tree: sha(tree?.sha), parents: [snapshot.headSha],
+    });
+    const commitSha = sha(created?.sha);
+    const record = {
+      requestId: body.requestId, fingerprint: identity, status: 'prepared', createdAt: Date.now(),
+      baseHead: snapshot.headSha, commitSha,
+      result: { ok: true, sha: commitSha, module, mode: 'delete', publishStatus: 'pending' },
+    };
     await this.saveRecord(record);
     return this.resume(token, record);
   }

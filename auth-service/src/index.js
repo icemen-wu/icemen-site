@@ -79,6 +79,7 @@ function route(request) {
     '/api/github/connect': 'POST',
     '/api/files': 'GET',
     '/api/files/upload': 'POST',
+    '/api/files/delete': 'POST',
     '/api/publish-status': 'GET',
     '/api/data/price-calculator': ['GET', 'POST'],
   };
@@ -305,7 +306,7 @@ export class AuthState {
         json: (data, status = 200) => jsonResponse(request, data, status),
       });
     }
-    if (['/api/github/status', '/api/github/connect', '/api/files', '/api/files/upload', '/api/publish-status'].includes(pathname)) {
+    if (['/api/github/status', '/api/github/connect', '/api/files', '/api/files/upload', '/api/files/delete', '/api/publish-status'].includes(pathname)) {
       await this.session(request);
       const github = new GitHubFiles(this.ctx.storage);
       let result;
@@ -313,6 +314,7 @@ export class AuthState {
       else if (pathname === '/api/github/connect') result = await github.connect(await readJson(request));
       else if (pathname === '/api/files') result = await github.files();
       else if (pathname === '/api/files/upload') result = await github.upload(await readJson(request, MAX_UPLOAD_JSON_BYTES));
+      else if (pathname === '/api/files/delete') result = await github.delete(await readJson(request));
       else result = await github.publishStatus(new URL(request.url).searchParams.get('sha'));
       return jsonResponse(request, result);
     }
