@@ -9,9 +9,13 @@
 在本目录运行 Wrangler。配置文件中的 `pages_build_output_dir` 和 `services` 分别指定静态目录和现有 Worker；不要修改原 Worker 的名称、Durable Object 绑定、迁移记录或存储。
 
 ```sh
-wrangler pages project create icemen-api-gateway --production-branch main
+wrangler pages project create icemen-api-gateway --production-branch main --force
 wrangler pages deploy public --project-name icemen-api-gateway --branch main
 ```
+
+首次创建时的 `--force` 用于明确选择 Pages，跳过新版 Wrangler 对新静态项目的自动 Workers 迁移；它不是强制覆盖文件或项目。这个入口需要 Pages 对外部 DNS 子域名的支持。项目创建成功后，后续部署不再添加 `--force`；现有 Pages 项目以及包含 `public/_worker.js` 的部署都会直接使用 Pages。
+
+`main` 必须与创建时的生产分支一致。部署会读取本目录的 `wrangler.jsonc`；未单独定义 `env.production` 时，Pages 使用顶层的 `services`，把生产入口的 `AUTH` 绑定到原 `icemen-auth`。
 
 首次操作需要登录账号具有 `pages:write` 权限。若现有 Wrangler 授权不足，通过 Wrangler 官方登录页增加此权限，保留已有的 `user:read`、`account:read`、`workers_scripts:write` 等所需权限。不要读取凭据文件、打印令牌或把令牌复制到聊天与代码中。
 
